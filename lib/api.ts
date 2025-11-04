@@ -15,6 +15,43 @@ interface ApiConfig {
 let lastRateLimitTime: number | null = null;
 let rateLimitCount = 0;
 
+// Helper function to add exponential backoff retry logic
+async function fetchWithRetry(
+  url: string, 
+  options: RequestInit, 
+  retries = 3, 
+  backoff = 300
+): Promise<Response> {
+  try {
+    const response = await fetch(url, options);
+    
+    // If we get rate limited (429) and have retries left, retry with backoff
+    if (response.status === 429 && retries > 0) {
+      console.warn(`Rate limited when accessing ${url}. Retrying after ${backoff}ms...`);
+      
+      // Wait for backoff period
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      
+      // Retry with increased backoff (exponential)
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    
+    return response;
+  } catch (error) {
+    if (retries > 0) {
+      console.warn(`Error fetching ${url}, retrying...`, error);
+      
+      // Wait for backoff period
+      await new Promise(resolve => setTimeout(resolve, backoff));
+      
+      // Retry with increased backoff
+      return fetchWithRetry(url, options, retries - 1, backoff * 2);
+    }
+    
+    throw error;
+  }
+}
+
 async function fetchFromCTFd<T>(endpoint: string, config: ApiConfig): Promise<T> {
   // Check if we've been rate limited recently and slow down requests
   if (lastRateLimitTime && Date.now() - lastRateLimitTime < 60000) {
@@ -23,25 +60,33 @@ async function fetchFromCTFd<T>(endpoint: string, config: ApiConfig): Promise<T>
     await new Promise(resolve => setTimeout(resolve, delayTime));
   }
   
-  const res = await fetch('/api/ctfd', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  // Construct the full URL - direct call to CTFd API
+  const fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
+  
+  const res = await fetchWithRetry(
+    fullUrl,
+    {
+      headers: {
+        'Authorization': `Token ${config.apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-cache',
     },
-    body: JSON.stringify({
-      endpoint,
-      apiUrl: config.apiUrl,
-      apiToken: config.apiToken,
-    }),
-  });
+    3, // 3 retries
+    300 // Starting backoff of 300ms
+  );
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
     
     // Track rate limiting
-    if (res.status === 429 || (errorData && errorData.isRateLimit)) {
+    if (res.status === 429) {
       lastRateLimitTime = Date.now();
       rateLimitCount = Math.min(rateLimitCount + 1, 5);
+      
+      const retryAfter = res.headers.get('Retry-After');
+      const errorMessage = `Rate limit exceeded. ${retryAfter ? `Try again after ${retryAfter} seconds.` : 'Try increasing the refetch interval in Dev Tools.'}`;
+      throw new Error(errorMessage);
     }
     
     throw new Error(errorData.error || `Failed to fetch ${endpoint}: ${res.statusText}`);
@@ -68,23 +113,27 @@ async function fetchSubmissionsFromCTFd(endpoint: string, config: ApiConfig): Pr
     await new Promise(resolve => setTimeout(resolve, delayTime));
   }
 
-  const res = await fetch('/api/ctfd', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+  // Construct the full URL - direct call to CTFd API
+  const fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
+
+  const res = await fetchWithRetry(
+    fullUrl,
+    {
+      headers: {
+        'Authorization': `Token ${config.apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-cache',
     },
-    body: JSON.stringify({
-      endpoint,
-      apiUrl: config.apiUrl,
-      apiToken: config.apiToken,
-    }),
-  });
+    3, // 3 retries
+    300 // Starting backoff of 300ms
+  );
 
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({ error: 'Unknown error' }));
     
     // Track rate limiting
-    if (res.status === 429 || (errorData && errorData.isRateLimit)) {
+    if (res.status === 429) {
       lastRateLimitTime = Date.now();
       rateLimitCount = Math.min(rateLimitCount + 1, 5);
     }
@@ -138,20 +187,24 @@ export const getSubmissions = (config: ApiConfig, params?: {
 
 export const getCtfConfig = async (key: string, config: ApiConfig): Promise<string | null> => {
   try {
-    const response: ConfigResponse = await fetch('/api/ctfd', {
-      method: 'POST',
+    const fullUrl = `${config.apiUrl}/api/v1/configs?key=${key}`;
+    
+    const response = await fetch(fullUrl, {
       headers: {
+        'Authorization': `Token ${config.apiToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        endpoint: `/configs?key=${key}`,
-        apiUrl: config.apiUrl,
-        apiToken: config.apiToken,
-      }),
-    }).then(res => res.json());
+      cache: 'no-cache',
+    });
 
-    if (response.success && response.data && response.data.length > 0) {
-      return response.data[0].value;
+    if (!response.ok) {
+      return null;
+    }
+
+    const json: ConfigResponse = await response.json();
+
+    if (json.success && json.data && json.data.length > 0) {
+      return json.data[0].value;
     }
     return null;
   } catch {
@@ -169,16 +222,14 @@ export const getCtfEnd = (config: ApiConfig): Promise<number | null> =>
   getCtfConfig('end', config).then(value => value ? parseInt(value, 10) : null);
 
 export const getChallengeSolves = async (config: ApiConfig, challengeId: number): Promise<ChallengeSolvesResponse> => {
-  const res = await fetch('/api/ctfd', {
-    method: 'POST',
+  const fullUrl = `${config.apiUrl}/api/v1/challenges/${challengeId}/solves`;
+  
+  const res = await fetch(fullUrl, {
     headers: {
+      'Authorization': `Token ${config.apiToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      endpoint: `/challenges/${challengeId}/solves`,
-      apiUrl: config.apiUrl,
-      apiToken: config.apiToken,
-    }),
+    cache: 'no-cache',
   });
 
   if (!res.ok) {
