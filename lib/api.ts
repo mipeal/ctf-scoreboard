@@ -28,7 +28,8 @@ async function fetchWithRetry(
     // If we get rate limited (429) and have retries left, retry with backoff
     if (response.status === 429 && retries > 0) {
       // Sanitize URL for logging - remove query parameters and fragments
-      const sanitizedUrl = new URL(url).origin + new URL(url).pathname;
+      const urlObj = new URL(url);
+      const sanitizedUrl = urlObj.origin + urlObj.pathname;
       console.warn(`Rate limited when accessing ${sanitizedUrl}. Retrying after ${backoff}ms...`);
       
       // Wait for backoff period
@@ -42,7 +43,8 @@ async function fetchWithRetry(
   } catch (error) {
     if (retries > 0) {
       // Sanitize URL for logging - remove query parameters and fragments
-      const sanitizedUrl = new URL(url).origin + new URL(url).pathname;
+      const urlObj = new URL(url);
+      const sanitizedUrl = urlObj.origin + urlObj.pathname;
       console.warn(`Error fetching ${sanitizedUrl}, retrying...`);
       
       // Wait for backoff period
