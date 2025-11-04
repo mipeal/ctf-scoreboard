@@ -15,7 +15,29 @@ interface ApiConfig {
 let lastRateLimitTime: number | null = null;
 let rateLimitCount = 0;
 
-// Helper function to add exponential backoff retry logic
+/**
+ * Sanitizes a URL for logging by removing query parameters and fragments
+ * that might contain sensitive information.
+ * 
+ * @param url - The URL string to sanitize
+ * @returns The sanitized URL containing only origin and pathname
+ */
+function sanitizeUrlForLogging(url: string): string {
+  const urlObj = new URL(url);
+  return urlObj.origin + urlObj.pathname;
+}
+
+/**
+ * Fetches a URL with automatic retry logic and exponential backoff.
+ * Handles rate limiting (429 status codes) and network errors gracefully.
+ * 
+ * @param url - The URL to fetch
+ * @param options - Fetch options (headers, method, etc.)
+ * @param retries - Number of retry attempts remaining (default: 3)
+ * @param backoff - Initial backoff delay in milliseconds (default: 300ms, doubles each retry)
+ * @returns Promise resolving to the fetch Response
+ * @throws Error if all retries are exhausted
+ */
 async function fetchWithRetry(
   url: string, 
   options: RequestInit, 
@@ -27,9 +49,7 @@ async function fetchWithRetry(
     
     // If we get rate limited (429) and have retries left, retry with backoff
     if (response.status === 429 && retries > 0) {
-      // Sanitize URL for logging - remove query parameters and fragments
-      const urlObj = new URL(url);
-      const sanitizedUrl = urlObj.origin + urlObj.pathname;
+      const sanitizedUrl = sanitizeUrlForLogging(url);
       console.warn(`Rate limited when accessing ${sanitizedUrl}. Retrying after ${backoff}ms...`);
       
       // Wait for backoff period
@@ -42,9 +62,7 @@ async function fetchWithRetry(
     return response;
   } catch (error) {
     if (retries > 0) {
-      // Sanitize URL for logging - remove query parameters and fragments
-      const urlObj = new URL(url);
-      const sanitizedUrl = urlObj.origin + urlObj.pathname;
+      const sanitizedUrl = sanitizeUrlForLogging(url);
       console.warn(`Error fetching ${sanitizedUrl}, retrying...`);
       
       // Wait for backoff period
