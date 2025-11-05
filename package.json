@@ -4,8 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "npm run build:clean-api && next build --turbopack",
-    "build:clean-api": "rm -rf app/api || true",
+    "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"
   },

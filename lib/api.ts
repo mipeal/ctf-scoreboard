@@ -11,16 +11,6 @@ interface ApiConfig {
   apiToken: string;
 }
 
-/**
- * Detects if the application is running in development mode (localhost).
- * Used to determine whether to use the API proxy or direct API calls.
- * 
- * @returns true if running on localhost, false otherwise
- */
-function isDevelopmentEnvironment(): boolean {
-  return typeof window !== 'undefined' && window.location.hostname === 'localhost';
-}
-
 // Rate limit tracking
 let lastRateLimitTime: number | null = null;
 let rateLimitCount = 0;
@@ -94,26 +84,8 @@ async function fetchFromCTFd<T>(endpoint: string, config: ApiConfig): Promise<T>
     await new Promise(resolve => setTimeout(resolve, delayTime));
   }
   
-  // Use proxy in development, direct calls in production
-  const isDevelopment = isDevelopmentEnvironment();
-  
-  let fullUrl: string;
-  if (isDevelopment) {
-    // Use Next.js API proxy route to avoid CORS issues in development
-    const searchParams = new URLSearchParams();
-    searchParams.set('ctfd_url', config.apiUrl);
-    
-    // Handle endpoints that already have query parameters
-    if (endpoint.includes('?')) {
-      const [path, query] = endpoint.split('?');
-      fullUrl = `/api/ctfd${path}?${query}&${searchParams.toString()}`;
-    } else {
-      fullUrl = `/api/ctfd${endpoint}?${searchParams.toString()}`;
-    }
-  } else {
-    // Direct call to CTFd API in production
-    fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
-  }
+  // Construct the full URL - direct call to CTFd API
+  const fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
   
   const res = await fetchWithRetry(
     fullUrl,
@@ -165,26 +137,8 @@ async function fetchSubmissionsFromCTFd(endpoint: string, config: ApiConfig): Pr
     await new Promise(resolve => setTimeout(resolve, delayTime));
   }
 
-  // Use proxy in development, direct calls in production
-  const isDevelopment = isDevelopmentEnvironment();
-  
-  let fullUrl: string;
-  if (isDevelopment) {
-    // Use Next.js API proxy route to avoid CORS issues in development
-    const searchParams = new URLSearchParams();
-    searchParams.set('ctfd_url', config.apiUrl);
-    
-    // Handle endpoints that already have query parameters
-    if (endpoint.includes('?')) {
-      const [path, query] = endpoint.split('?');
-      fullUrl = `/api/ctfd${path}?${query}&${searchParams.toString()}`;
-    } else {
-      fullUrl = `/api/ctfd${endpoint}?${searchParams.toString()}`;
-    }
-  } else {
-    // Direct call to CTFd API in production
-    fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
-  }
+  // Construct the full URL - direct call to CTFd API
+  const fullUrl = `${config.apiUrl}/api/v1${endpoint}`;
 
   const res = await fetchWithRetry(
     fullUrl,
@@ -257,19 +211,7 @@ export const getSubmissions = (config: ApiConfig, params?: {
 
 export const getCtfConfig = async (key: string, config: ApiConfig): Promise<string | null> => {
   try {
-    // Use proxy in development, direct calls in production
-    const isDevelopment = isDevelopmentEnvironment();
-    
-    let fullUrl: string;
-    if (isDevelopment) {
-      const searchParams = new URLSearchParams();
-      searchParams.set('ctfd_url', config.apiUrl);
-      searchParams.set('key', key);
-      
-      fullUrl = `/api/ctfd/configs?${searchParams.toString()}`;
-    } else {
-      fullUrl = `${config.apiUrl}/api/v1/configs?key=${key}`;
-    }
+    const fullUrl = `${config.apiUrl}/api/v1/configs?key=${key}`;
     
     const response = await fetchWithRetry(
       fullUrl,
@@ -309,18 +251,7 @@ export const getCtfEnd = (config: ApiConfig): Promise<number | null> =>
   getCtfConfig('end', config).then(value => value ? parseInt(value, 10) : null);
 
 export const getChallengeSolves = async (config: ApiConfig, challengeId: number): Promise<ChallengeSolvesResponse> => {
-  // Use proxy in development, direct calls in production
-  const isDevelopment = isDevelopmentEnvironment();
-  
-  let fullUrl: string;
-  if (isDevelopment) {
-    const searchParams = new URLSearchParams();
-    searchParams.set('ctfd_url', config.apiUrl);
-    
-    fullUrl = `/api/ctfd/challenges/${challengeId}/solves?${searchParams.toString()}`;
-  } else {
-    fullUrl = `${config.apiUrl}/api/v1/challenges/${challengeId}/solves`;
-  }
+  const fullUrl = `${config.apiUrl}/api/v1/challenges/${challengeId}/solves`;
   
   const res = await fetchWithRetry(
     fullUrl,
