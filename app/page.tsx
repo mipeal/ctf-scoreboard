@@ -16,6 +16,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Trophy, Flag, Users, Clock, Target, TrendingUp, Settings, Droplets } from "lucide-react";
 import { ConfigDialog } from '@/components/config-dialog';
 import { DynamicTitle } from '@/components/dynamic-title';
@@ -57,8 +58,26 @@ export default function CTFScoreboard() {
   const [challengesPage, setChallengesPage] = useState(1);
   const [firstBloods, setFirstBloods] = useState<Map<number, number>>(new Map());
   const [firstBloodUsers, setFirstBloodUsers] = useState<Map<number, {id: number, name: string}>>(new Map());
-  const itemsPerPage = 10;
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [currentTab, setCurrentTab] = useState("scoreboard");
+  const [autoRotate, setAutoRotate] = useState(false);
   const challengesPerPage = 9;
+  const tabs = ["scoreboard", "submissions", "challenges", "analytics"];
+
+  // Auto-rotate tabs
+  useEffect(() => {
+    if (!autoRotate || !isConfigured) return;
+    
+    const rotationInterval = setInterval(() => {
+      setCurrentTab((prevTab) => {
+        const currentIndex = tabs.indexOf(prevTab);
+        const nextIndex = (currentIndex + 1) % tabs.length;
+        return tabs[nextIndex];
+      });
+    }, 10000); // Rotate every 10 seconds
+
+    return () => clearInterval(rotationInterval);
+  }, [autoRotate, isConfigured]);
 
   useEffect(() => {
     if (!challenges || !Array.isArray(challenges)) return;
@@ -104,7 +123,17 @@ export default function CTFScoreboard() {
   const allusers = scoreboardResponse?.data ? Object.entries(scoreboardResponse.data).map(([pos, entry]: [string, ScoreboardEntry]) => {
     const solves = Array.isArray(entry.solves) ? entry.solves : [];
     
-    const userFirstBloods = solves.filter((solve: ScoreboardEntry['solves'][0]) => {
+    // Filter out invalid solves - only keep solves for challenges that exist in the challenges list
+    const validSolves = solves.filter((solve: ScoreboardEntry['solves'][0]) => {
+      // If we have the challenges list, verify the challenge exists
+      if (challenges && Array.isArray(challenges)) {
+        return challenges.some((c: Challenge) => c.id === solve.challenge_id);
+      }
+      // If we don't have challenges list yet, keep all solves (they'll be validated later)
+      return true;
+    });
+    
+    const userFirstBloods = validSolves.filter((solve: ScoreboardEntry['solves'][0]) => {
       return firstBloods.get(solve.challenge_id) === entry.id;
     }).length;
     
@@ -112,11 +141,11 @@ export default function CTFScoreboard() {
       rank: parseInt(pos),
       name: entry.name,
       score: entry.score,
-      solves: solves,
-      solvedChallenges: solves.length,
+      solves: validSolves,
+      solvedChallenges: validSolves.length,
       firstBloods: userFirstBloods,
       account_id: entry.id,
-      last_solve: solves.length > 0 ? solves.sort((a: ScoreboardEntry['solves'][0], b: ScoreboardEntry['solves'][0]) => 
+      last_solve: validSolves.length > 0 ? validSolves.sort((a: ScoreboardEntry['solves'][0], b: ScoreboardEntry['solves'][0]) => 
         new Date(b.date).getTime() - new Date(a.date).getTime()
       )[0].date : null
     };
@@ -154,14 +183,23 @@ export default function CTFScoreboard() {
   };
 
   const processedScoreboard = fullScoreboard ? fullScoreboard.map((entry: ScoreboardEntry) => {
-    const userFirstBloods = Array.isArray(entry.solves) ? entry.solves.filter((solve: ScoreboardEntry['solves'][0]) => {
+    // Filter out invalid solves - only keep solves for challenges that exist in the challenges list
+    const validSolves = Array.isArray(entry.solves) ? entry.solves.filter((solve: ScoreboardEntry['solves'][0]) => {
+      if (challenges && Array.isArray(challenges)) {
+        return challenges.some((c: Challenge) => c.id === solve.challenge_id);
+      }
+      return true;
+    }) : [];
+    
+    const userFirstBloods = validSolves.filter((solve: ScoreboardEntry['solves'][0]) => {
       return firstBloods.get(solve.challenge_id) === entry.id;
-    }).length : 0;
+    }).length;
     
     return {
       ...entry,
+      solves: validSolves,
       firstBloods: userFirstBloods,
-      solvedChallenges: Array.isArray(entry.solves) ? entry.solves.length : 0
+      solvedChallenges: validSolves.length
     };
   }) : [];
   
@@ -297,13 +335,27 @@ export default function CTFScoreboard() {
               </Card>
             </div>
 
-            <Tabs defaultValue="scoreboard" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-1">
-                <TabsTrigger value="scoreboard" className="text-xs sm:text-sm">Scoreboard</TabsTrigger>
-                <TabsTrigger value="submissions" className="text-xs sm:text-sm">Submissions</TabsTrigger>
-                <TabsTrigger value="challenges" className="text-xs sm:text-sm">Challenges</TabsTrigger>
-                <TabsTrigger value="analytics" className="text-xs sm:text-sm">Analytics</TabsTrigger>
-              </TabsList>
+            <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-4">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 gap-1">
+                  <TabsTrigger value="scoreboard" className="text-xs sm:text-sm">Scoreboard</TabsTrigger>
+                  <TabsTrigger value="submissions" className="text-xs sm:text-sm">Submissions</TabsTrigger>
+                  <TabsTrigger value="challenges" className="text-xs sm:text-sm">Challenges</TabsTrigger>
+                  <TabsTrigger value="analytics" className="text-xs sm:text-sm">Analytics</TabsTrigger>
+                </TabsList>
+                <button
+                  onClick={() => setAutoRotate(!autoRotate)}
+                  className={`flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-2 text-xs rounded-md transition-colors whitespace-nowrap ${
+                    autoRotate 
+                      ? 'bg-green-500 text-white hover:bg-green-600' 
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                  title={autoRotate ? "Auto-rotation enabled (10s)" : "Enable auto-rotation"}
+                >
+                  <span className="hidden sm:inline">{autoRotate ? '🔄 Auto' : '▶️ Auto'}</span>
+                  <span className="sm:hidden">{autoRotate ? '🔄' : '▶️'}</span>
+                </button>
+              </div>
 
               <TabsContent value="scoreboard" className="space-y-4">
                 <Card>
@@ -403,70 +455,95 @@ export default function CTFScoreboard() {
                       </div>
                     )}
                     
-                    {allusers.length > itemsPerPage && (
+                    {allusers.length > 0 && (
                       <div className="flex flex-col sm:flex-row items-center justify-between gap-2 mt-4 sm:mt-6 px-4 sm:px-0">
-                        <div className="text-xs sm:text-sm text-muted-foreground">
-                          Showing {startIndex + 1} to {Math.min(endIndex, allusers.length)} of {allusers.length} users
+                        <div className="flex items-center gap-2 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
+                          <span>
+                            Showing {startIndex + 1} to {Math.min(endIndex, allusers.length)} of {allusers.length} users
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="whitespace-nowrap">Per page:</span>
+                            <Select 
+                              value={itemsPerPage.toString()} 
+                              onValueChange={(value) => {
+                                setItemsPerPage(parseInt(value));
+                                setCurrentPage(1); // Reset to first page when changing items per page
+                              }}
+                            >
+                              <SelectTrigger className="w-16 h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="5">5</SelectItem>
+                                <SelectItem value="10">10</SelectItem>
+                                <SelectItem value="20">20</SelectItem>
+                                <SelectItem value="50">50</SelectItem>
+                                <SelectItem value="100">100</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
-                        <Pagination>
-                          <PaginationContent>
-                            <PaginationItem>
-                              <PaginationPrevious 
-                                href="#"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  if (currentPage > 1) handlePageChange(currentPage - 1);
-                                }}
-                                className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
-                              />
-                            </PaginationItem>
-                            
-                            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
-                              let pageNum;
-                              if (totalPages <= 5) {
-                                pageNum = i + 1;
-                              } else if (currentPage <= 3) {
-                                pageNum = i + 1;
-                              } else if (currentPage >= totalPages - 2) {
-                                pageNum = totalPages - 4 + i;
-                              } else {
-                                pageNum = currentPage - 2 + i;
-                              }
-                              
-                              return (
-                                <PaginationItem key={pageNum}>
-                                  <PaginationLink
-                                    href="#"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      handlePageChange(pageNum);
-                                    }}
-                                    isActive={currentPage === pageNum}
-                                  >
-                                    {pageNum}
-                                  </PaginationLink>
-                                </PaginationItem>
-                              );
-                            })}
-                            
-                            {totalPages > 5 && currentPage < totalPages - 2 && (
+                        {allusers.length > itemsPerPage && (
+                          <Pagination>
+                            <PaginationContent>
                               <PaginationItem>
-                                <PaginationEllipsis />
+                                <PaginationPrevious 
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    if (currentPage > 1) handlePageChange(currentPage - 1);
+                                  }}
+                                  className={currentPage === 1 ? "pointer-events-none opacity-50" : ""}
+                                />
                               </PaginationItem>
-                            )}
-                            
-                            <PaginationItem>
-                              <PaginationNext 
-                                href="#"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  if (currentPage < totalPages) handlePageChange(currentPage + 1);
-                                }}
-                                className={currentPage === totalPages ? "pointer-events-none opacity-50" : ""}
-                              />
-                            </PaginationItem>
-                          </PaginationContent>
-                        </Pagination>
+                              
+                              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                                let pageNum;
+                                if (totalPages <= 5) {
+                                  pageNum = i + 1;
+                                } else if (currentPage <= 3) {
+                                  pageNum = i + 1;
+                                } else if (currentPage >= totalPages - 2) {
+                                  pageNum = totalPages - 4 + i;
+                                } else {
+                                  pageNum = currentPage - 2 + i;
+                                }
+                                
+                                return (
+                                  <PaginationItem key={pageNum}>
+                                    <PaginationLink
+                                      href="#"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        handlePageChange(pageNum);
+                                      }}
+                                      isActive={currentPage === pageNum}
+                                    >
+                                      {pageNum}
+                                    </PaginationLink>
+                                  </PaginationItem>
+                                );
+                              })}
+                              
+                              {totalPages > 5 && currentPage < totalPages - 2 && (
+                                <PaginationItem>
+                                  <PaginationEllipsis />
+                                </PaginationItem>
+                              )}
+                              
+                              <PaginationItem>
+                                <PaginationNext 
+                                  href="#"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    if (currentPage < totalPages) handlePageChange(currentPage + 1);
+                                  }}
+                                  className={currentPage === totalPages ? "pointer-events-none opacity-50" : ""}
+                                />
+                              </PaginationItem>
+                            </PaginationContent>
+                          </Pagination>
+                        )}
                       </div>
                     )}
                   </CardContent>
